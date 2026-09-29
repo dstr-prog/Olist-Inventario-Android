@@ -1,0 +1,18 @@
+# Gradle e Android Studio
+.gradle/
+.kotlin/
+**/build/
+.idea/
+*.iml
+local.properties
+captures/
+
+# Arquivos locais e credenciais
+.env
+secrets.properties
+*.jks
+*.keystore
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
