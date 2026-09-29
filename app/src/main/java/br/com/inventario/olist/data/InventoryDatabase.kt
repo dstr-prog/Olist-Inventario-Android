@@ -21,6 +21,8 @@ data class Catalog(
     val products: List<Product>,
 )
 
+data class CatalogImportSummary(val added: Int, val updated: Int)
+
 class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory_olist.db", null, 1) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""CREATE TABLE products (
@@ -37,25 +39,41 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-    fun replaceCatalog(catalog: Catalog) {
+    fun mergeCatalog(catalog: Catalog): CatalogImportSummary {
+        val currentHeaders = headers()
+        require(currentHeaders.isEmpty() || currentHeaders == catalog.headers) {
+            "A planilha tem colunas diferentes da primeira importada. Use arquivos exportados no mesmo formato."
+        }
+        var added = 0
+        var updated = 0
         writableDatabase.beginTransaction()
         try {
-            writableDatabase.delete("products", null, null)
             catalog.products.forEach { product ->
-                writableDatabase.insertOrThrow("products", null, ContentValues().apply {
-                    put("id", product.id)
+                val values = ContentValues().apply {
                     put("sku", product.sku)
                     put("description", product.description)
                     put("gtin", product.gtin)
                     put("location", product.location)
-                })
+                }
+                val changed = writableDatabase.update("products", values, "id = ?", arrayOf(product.id))
+                if (changed == 0) {
+                    writableDatabase.insertOrThrow("products", null, ContentValues(values).apply {
+                        put("id", product.id)
+                    })
+                    added++
+                } else {
+                    updated++
+                }
             }
-            saveMeta("headers", catalog.headers.joinToString("\u001f"))
-            saveMeta("sheet", catalog.sheetName)
+            if (currentHeaders.isEmpty()) {
+                saveMeta("headers", catalog.headers.joinToString("\u001f"))
+                saveMeta("sheet", catalog.sheetName)
+            }
             writableDatabase.setTransactionSuccessful()
         } finally {
             writableDatabase.endTransaction()
         }
+        return CatalogImportSummary(added, updated)
     }
 
     fun headers(): List<String> = getMeta("headers")?.split("\u001f") ?: emptyList()

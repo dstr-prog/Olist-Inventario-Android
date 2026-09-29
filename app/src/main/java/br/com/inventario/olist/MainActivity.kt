@@ -40,15 +40,20 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -90,32 +95,63 @@ class MainActivity : ComponentActivity() {
 private fun InventoryScreen(database: InventoryDatabase, contentResolver: android.content.ContentResolver) {
     var revision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("Importe a planilha de produtos da Olist para começar.") }
+    var showCountingScreen by remember { mutableStateOf(false) }
     var barcode by remember { mutableStateOf("") }
-    var quantity by remember { mutableStateOf("1") }
+    var quantity by remember { mutableStateOf("0") }
     var location by remember { mutableStateOf("") }
     var candidate by remember { mutableStateOf<Product?>(null) }
     var choices by remember { mutableStateOf<List<Product>>(emptyList()) }
     var showDuplicateDialog by remember { mutableStateOf(false) }
-    var pendingCatalog by remember { mutableStateOf<Catalog?>(null) }
-    var showCatalogResetDialog by remember { mutableStateOf(false) }
+    var showZeroQuantityDialog by remember { mutableStateOf(false) }
+    var showAdjustDialog by remember { mutableStateOf(false) }
+    var adjustedQuantity by remember { mutableStateOf("") }
+    var refocusBarcode by remember { mutableStateOf(false) }
+    val barcodeFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    fun installCatalog(catalog: Catalog) {
-        database.replaceCatalog(catalog)
+    LaunchedEffect(refocusBarcode) {
+        if (refocusBarcode) {
+            barcodeFocusRequester.requestFocus()
+            keyboardController?.show()
+            refocusBarcode = false
+        }
+    }
+
+    fun importCatalog(catalog: Catalog) {
+        val summary = database.mergeCatalog(catalog)
         candidate = null
         choices = emptyList()
-        status = "Catálogo carregado: ${catalog.products.size} produtos."
+        status = "Importação concluída: ${summary.added} novos e ${summary.updated} atualizados. Contagens anteriores preservadas."
         revision++
+    }
+
+    fun selectProduct(product: Product) {
+        candidate = product
+        choices = emptyList()
+    }
+
+    fun finishCount(product: Product, counted: Double, message: String, countLocation: String = location) {
+        database.saveCount(product.id, counted, countLocation)
+        status = message
+        location = countLocation.take(10)
+        candidate = null
+        choices = emptyList()
+        barcode = ""
+        quantity = "0"
+        revision++
+        refocusBarcode = true
     }
 
     val barcodeScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
         result.contents?.let { scanned ->
             barcode = scanned
-            choices = database.findByBarcode(scanned)
-            candidate = choices.singleOrNull()
-            if (candidate != null) location = candidate?.location.orEmpty().take(10)
+            val matches = database.findByBarcode(scanned)
+            choices = matches
+            candidate = matches.singleOrNull()
+            candidate?.let(::selectProduct)
             status = when {
-                choices.isEmpty() -> "Produto não encontrado para: $scanned"
-                choices.size == 1 -> "Produto localizado."
+                matches.isEmpty() -> "Produto não encontrado para: $scanned"
+                matches.size == 1 -> "Produto localizado."
                 else -> "Há mais de um produto com esse código. Escolha o correto."
             }
         }
@@ -125,10 +161,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         if (uri != null) {
             runCatching {
                 val catalog = OlistWorkbook.import(contentResolver, uri)
-                if (database.countedCount() > 0) {
-                    pendingCatalog = catalog
-                    showCatalogResetDialog = true
-                } else installCatalog(catalog)
+                importCatalog(catalog)
             }.onFailure { error -> status = error.message ?: "Não foi possível importar a planilha." }
         }
     }
@@ -153,7 +186,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Inventário Olist", fontWeight = FontWeight.SemiBold) },
+                title = { Text("Inventário Olist | Dstr-Tech", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { Icon(Icons.Default.Inventory2, contentDescription = null, tint = Green, modifier = Modifier.padding(start = 16.dp, end = 10.dp)) },
             )
         },
@@ -163,35 +196,47 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(Modifier.height(2.dp))
-            Text("Contagem de estoque", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            Text("Carregue os produtos, conte pelo código de barras e exporte para atualizar a Olist.", color = Color(0xFF56615E))
+            if (!showCountingScreen) {
+                Text("Contagem de estoque", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text("Carregue os produtos, conte pelo código de barras e exporte para atualizar a Olist.", color = Color(0xFF56615E))
 
-            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = PaleGreen)) {
-                Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Metric("Produtos", productCount.toString())
-                    HorizontalDivider(Modifier.size(width = 1.dp, height = 44.dp), color = Color(0xFFBFD9D1))
-                    Metric("Contados", countedCount.toString())
+                ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = PaleGreen)) {
+                    Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Metric("Produtos", productCount.toString())
+                        HorizontalDivider(Modifier.size(width = 1.dp, height = 44.dp), color = Color(0xFFBFD9D1))
+                        Metric("Contados", countedCount.toString())
+                    }
                 }
-            }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(onClick = { importLauncher.launch(arrayOf("application/vnd.ms-excel", "application/octet-stream")) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  Importar XLS")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = { importLauncher.launch(arrayOf("application/vnd.ms-excel", "application/octet-stream")) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  Importar XLS")
+                    }
+                    OutlinedButton(
+                        onClick = { exportLauncher.launch("inventario_olist.xls") },
+                        enabled = countedCount > 0,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  Exportar")
+                    }
                 }
-                OutlinedButton(
-                    onClick = { exportLauncher.launch("inventario_olist.xls") },
-                    enabled = countedCount > 0,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("  Exportar")
-                }
-            }
 
-            Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Registrar contagem", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Button(onClick = { showCountingScreen = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Contagem")
+                }
+
+                Text(status, color = Green, fontWeight = FontWeight.Medium, modifier = Modifier.padding(vertical = 2.dp))
+            } else {
+                Text("Registrar contagem", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                OutlinedButton(onClick = { showCountingScreen = false }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("  Voltar")
+                }
+
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     OutlinedTextField(
                         value = location,
                         onValueChange = { location = it.take(10) },
@@ -210,7 +255,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         label = { Text("Código de barras ou SKU") },
                         placeholder = { Text("Leia com o leitor ou digite") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().focusRequester(barcodeFocusRequester),
                         trailingIcon = {
                             IconButton(onClick = {
                                 if (barcode.isBlank()) {
@@ -218,12 +263,13 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                                     choices = emptyList()
                                     status = "Informe ou leia um código."
                                 } else {
-                                    choices = database.findByBarcode(barcode.trim())
-                                    candidate = choices.singleOrNull()
-                                    if (candidate != null) location = candidate?.location.orEmpty().take(10)
+                                    val matches = database.findByBarcode(barcode.trim())
+                                    choices = matches
+                                    candidate = matches.singleOrNull()
+                                    candidate?.let(::selectProduct)
                                     status = when {
-                                        choices.isEmpty() -> "Produto não encontrado para: ${barcode.trim()}"
-                                        choices.size == 1 -> "Produto localizado."
+                                        matches.isEmpty() -> "Produto não encontrado para: ${barcode.trim()}"
+                                        matches.size == 1 -> "Produto localizado."
                                         else -> "Há mais de um produto com esse código. Escolha o correto."
                                     }
                                 }
@@ -249,7 +295,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                     if (choices.size > 1) {
                         Text("Selecione o produto", fontWeight = FontWeight.Medium)
                         choices.forEach { product ->
-                            OutlinedButton(onClick = { candidate = product; choices = emptyList(); location = product.location.take(10) }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(onClick = { selectProduct(product) }, modifier = Modifier.fillMaxWidth()) {
                                 Text("${product.description}\nSKU ${product.sku} · EAN ${product.gtin}")
                             }
                         }
@@ -257,6 +303,14 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
 
                     candidate?.let { product ->
                         ProductCard(product)
+                        if (product.countedQuantity != null) {
+                            TextButton(onClick = {
+                                adjustedQuantity = product.countedQuantity.toString()
+                                showAdjustDialog = true
+                            }, modifier = Modifier.align(Alignment.End)) {
+                                Text("Ajustar quantidade")
+                            }
+                        }
                         OutlinedTextField(
                             value = quantity,
                             onValueChange = { value -> if (value.matches(Regex("^\\d{0,8}([,.]\\d{0,3})?$"))) quantity = value },
@@ -271,12 +325,10 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                                 status = "Informe uma quantidade válida."
                             } else if (product.countedQuantity != null) {
                                 showDuplicateDialog = true
+                            } else if (counted == 0.0) {
+                                showZeroQuantityDialog = true
                             } else {
-                                database.saveCount(product.id, counted, location)
-                                status = "Contagem registrada para ${product.description}."
-                                candidate = database.findByBarcode(barcode.trim()).firstOrNull { it.id == product.id }
-                                quantity = "1"
-                                revision++
+                                finishCount(product, counted, "Contagem registrada para ${product.description}.")
                             }
                         }, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.Check, contentDescription = null)
@@ -284,9 +336,11 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         }
                     }
                 }
+                }
+
+                Text(status, color = Green, fontWeight = FontWeight.Medium, modifier = Modifier.padding(vertical = 2.dp))
             }
 
-            Text(status, color = Green, fontWeight = FontWeight.Medium, modifier = Modifier.padding(vertical = 2.dp))
             Spacer(Modifier.height(14.dp))
         }
     }
@@ -302,23 +356,15 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             },
             confirmButton = {
                 Button(onClick = {
-                    database.saveCount(product.id, (product.countedQuantity ?: 0.0) + entered, location)
                     showDuplicateDialog = false
-                    status = "Quantidade somada para ${product.description}."
-                    candidate = database.findByBarcode(barcode.trim()).firstOrNull { it.id == product.id }
-                    quantity = "1"
-                    revision++
+                    finishCount(product, (product.countedQuantity ?: 0.0) + entered, "Quantidade somada para ${product.description}.")
                 }) { Text("Somar") }
             },
             dismissButton = {
                 Row {
                     OutlinedButton(onClick = {
-                        database.saveCount(product.id, entered, location)
                         showDuplicateDialog = false
-                        status = "Quantidade substituída para ${product.description}."
-                        candidate = database.findByBarcode(barcode.trim()).firstOrNull { it.id == product.id }
-                        quantity = "1"
-                        revision++
+                        finishCount(product, entered, "Quantidade substituída para ${product.description}.")
                     }) { Text("Sobrescrever") }
                     IconButton(onClick = { showDuplicateDialog = false }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Cancelar") }
                 }
@@ -326,23 +372,60 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         )
     }
 
-    if (showCatalogResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showCatalogResetDialog = false; pendingCatalog = null },
-            title = { Text("Substituir catálogo?") },
-            text = { Text("A contagem atual será apagada ao carregar outra planilha. Deseja continuar?") },
+    if (showZeroQuantityDialog) {
+        val product = candidate
+        if (product != null) AlertDialog(
+            onDismissRequest = { showZeroQuantityDialog = false },
+            title = { Text("Confirmar quantidade zero") },
+            text = { Text("Deseja registrar zero unidades para ${product.description}?") },
             confirmButton = {
                 Button(onClick = {
-                    pendingCatalog?.let(::installCatalog)
-                    pendingCatalog = null
-                    showCatalogResetDialog = false
-                }) { Text("Substituir") }
+                    showZeroQuantityDialog = false
+                    finishCount(product, 0.0, "Contagem zero registrada para ${product.description}.")
+                }) { Text("Registrar zero") }
             },
             dismissButton = {
-                OutlinedButton(onClick = { pendingCatalog = null; showCatalogResetDialog = false }) { Text("Cancelar") }
+                TextButton(onClick = { showZeroQuantityDialog = false }) { Text("Cancelar") }
             },
         )
     }
+
+    if (showAdjustDialog) {
+        val product = candidate
+        val corrected = adjustedQuantity.replace(',', '.').toDoubleOrNull()
+        if (product != null) AlertDialog(
+            onDismissRequest = { showAdjustDialog = false },
+            title = { Text("Ajustar quantidade") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Contagem salva: ${formatQuantity(product.countedQuantity ?: 0.0)}. Informe o total correto para substituir esse valor.")
+                    OutlinedTextField(
+                        value = adjustedQuantity,
+                        onValueChange = { value ->
+                            if (value.matches(Regex("^\\d{0,8}([,.]\\d{0,3})?$"))) adjustedQuantity = value
+                        },
+                        label = { Text("Nova quantidade total") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = corrected != null && corrected >= 0.0,
+                    onClick = {
+                        val newLocation = location.ifBlank { product.countedLocation }
+                        showAdjustDialog = false
+                        finishCount(product, corrected!!, "Contagem corrigida para ${product.description}.", newLocation)
+                    },
+                ) { Text("Salvar correção") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAdjustDialog = false }) { Text("Cancelar") }
+            },
+        )
+    }
+
 }
 
 @Composable
