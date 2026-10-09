@@ -19,9 +19,10 @@ data class Catalog(
     val headers: List<String>,
     val sheetName: String,
     val products: List<Product>,
+    val excludedProductIds: List<String> = emptyList(),
 )
 
-data class CatalogImportSummary(val added: Int, val updated: Int)
+data class CatalogImportSummary(val added: Int, val updated: Int, val removed: Int)
 
 class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory_olist.db", null, 1) {
     override fun onCreate(db: SQLiteDatabase) {
@@ -46,8 +47,13 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
         }
         var added = 0
         var updated = 0
+        var removed = 0
         writableDatabase.beginTransaction()
         try {
+            val includedIds = catalog.products.mapTo(mutableSetOf()) { it.id }
+            catalog.excludedProductIds.filterNot { it in includedIds }.distinct().forEach { productId ->
+                removed += writableDatabase.delete("products", "id = ?", arrayOf(productId))
+            }
             catalog.products.forEach { product ->
                 val values = ContentValues().apply {
                     put("sku", product.sku)
@@ -73,7 +79,7 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
         } finally {
             writableDatabase.endTransaction()
         }
-        return CatalogImportSummary(added, updated)
+        return CatalogImportSummary(added, updated, removed)
     }
 
     fun headers(): List<String> = getMeta("headers")?.split("\u001f") ?: emptyList()

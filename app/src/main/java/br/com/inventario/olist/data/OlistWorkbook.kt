@@ -6,7 +6,6 @@ import org.apache.poi.hssf.usermodel.HSSFWorkbook
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
-import java.io.OutputStream
 import java.text.Normalizer
 
 object OlistWorkbook {
@@ -22,45 +21,38 @@ object OlistWorkbook {
                 }
                 val columns = mapHeaders(headers)
                 val products = mutableListOf<Product>()
+                val excludedProductIds = mutableSetOf<String>()
                 for (rowIndex in (sheet.firstRowNum + 1)..sheet.lastRowNum) {
                     val row = sheet.getRow(rowIndex) ?: continue
                     val id = cellText(row.getCell(columns.id), formatter)
+                    if (id.isBlank()) continue
+                    val productType = cellText(row.getCell(columns.productType), formatter)
+                    if (!productType.equals("S", ignoreCase = true)) {
+                        excludedProductIds += id
+                        continue
+                    }
                     val sku = cellText(row.getCell(columns.sku), formatter)
                     val description = cellText(row.getCell(columns.description), formatter)
                     val gtin = cellText(row.getCell(columns.gtin), formatter)
                     val location = cellText(row.getCell(columns.location), formatter)
-                    if (id.isBlank() && sku.isBlank() && gtin.isBlank() && description.isBlank()) continue
-                    if (id.isBlank()) continue
                     products += Product(id, sku, description, gtin, location)
                 }
-                require(products.isNotEmpty()) { "Não encontrei produtos com ID na primeira aba." }
-                return Catalog(headers, sheet.sheetName, products)
+                require(products.isNotEmpty() || excludedProductIds.isNotEmpty()) {
+                    "Não encontrei produtos com ID na primeira aba."
+                }
+                return Catalog(headers, sheet.sheetName, products, excludedProductIds.toList())
             }
         }
     }
 
-    fun export(headers: List<String>, sheetName: String, products: List<Product>, output: OutputStream) {
-        require(headers.isNotEmpty()) { "Importe a planilha da Olist antes de exportar." }
-        require(products.isNotEmpty()) { "Ainda não há produtos contados para exportar." }
-        val columns = mapHeaders(headers)
-        HSSFWorkbook().use { workbook ->
-            val sheet = workbook.createSheet(sheetName.take(31).ifBlank { "Produtos" })
-            val headerRow = sheet.createRow(0)
-            headers.forEachIndexed { index, header -> headerRow.createCell(index).setCellValue(header) }
-
-            products.forEachIndexed { index, product ->
-                val row = sheet.createRow(index + 1)
-                row.createCell(columns.id).setCellValue(product.id)
-                row.createCell(columns.sku).setCellValue(product.sku)
-                row.createCell(columns.gtin).setCellValue(product.gtin)
-                row.createCell(columns.location).setCellValue(product.countedLocation)
-                row.createCell(columns.stock).setCellValue(product.countedQuantity ?: 0.0)
-            }
-            workbook.write(output)
-        }
-    }
-
-    private data class Columns(val id: Int, val sku: Int, val description: Int, val gtin: Int, val location: Int, val stock: Int)
+    private data class Columns(
+        val id: Int,
+        val sku: Int,
+        val description: Int,
+        val gtin: Int,
+        val location: Int,
+        val productType: Int,
+    )
 
     private fun mapHeaders(headers: List<String>): Columns {
         fun find(vararg candidates: String): Int {
@@ -74,7 +66,7 @@ object OlistWorkbook {
             description = find("Descrição", "Descricao"),
             gtin = find("GTIN/EAN", "GTIN", "EAN"),
             location = find("Localização", "Localizacao"),
-            stock = find("Estoque"),
+            productType = find("Tipo do produto"),
         )
     }
 

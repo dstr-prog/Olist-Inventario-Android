@@ -1,11 +1,13 @@
 package br.com.inventario.olist
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,9 +16,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -48,24 +55,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.inventario.olist.data.InventoryDatabase
 import br.com.inventario.olist.data.Catalog
+import br.com.inventario.olist.data.OlistInventoryTxt
 import br.com.inventario.olist.data.OlistWorkbook
 import br.com.inventario.olist.data.Product
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.text.NumberFormat
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val Green = Color(0xFF176B5B)
 private val PaleGreen = Color(0xFFE8F4F0)
@@ -90,15 +103,109 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+private fun SplashScreen(version: String, onFinished: () -> Unit) {
+    LaunchedEffect(Unit) {
+        delay(2_000)
+        onFinished()
+    }
+
+    val mint = Color(0xFF8CE0C3)
+    Box(
+        modifier = Modifier.fillMaxSize().background(
+            Brush.verticalGradient(
+                colors = listOf(Color(0xFF102B27), Color(0xFF176B5B), Color(0xFF0D3933)),
+            ),
+        ),
+    ) {
+        Box(
+            Modifier.align(Alignment.TopEnd).offset(x = 86.dp, y = (-78).dp).size(260.dp)
+                .clip(CircleShape).background(Color.White.copy(alpha = 0.035f)),
+        )
+        Box(
+            Modifier.align(Alignment.BottomStart).offset(x = (-104).dp, y = 100.dp).size(280.dp)
+                .clip(CircleShape).background(mint.copy(alpha = 0.055f)),
+        )
+
+        Column(
+            modifier = Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier.size(116.dp).clip(RoundedCornerShape(34.dp))
+                    .background(Color.White.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Inventory2,
+                    contentDescription = null,
+                    tint = mint,
+                    modifier = Modifier.size(62.dp),
+                )
+            }
+            Spacer(Modifier.height(28.dp))
+            Text("Inventário", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "OLIST",
+                color = mint,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 6.sp,
+            )
+            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.width(48.dp).height(1.dp).background(mint.copy(alpha = 0.7f)))
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "CONTAGEM DE ESTOQUE",
+                color = Color.White.copy(alpha = 0.78f),
+                fontSize = 12.sp,
+                letterSpacing = 2.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 42.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Dstr Tech", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text("Versão $version", color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp)
+        }
+    }
+}
+
+class SplashActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme(
+                colorScheme = MaterialTheme.colorScheme.copy(
+                    primary = Green,
+                    secondary = Color(0xFF46796E),
+                    surface = Color(0xFFF8FAF9),
+                ),
+            ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF102B27)) {
+                    SplashScreen(BuildConfig.VERSION_NAME) {
+                        startActivity(Intent(this@SplashActivity, MainActivity::class.java))
+                        finish()
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InventoryScreen(database: InventoryDatabase, contentResolver: android.content.ContentResolver) {
     var revision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("Importe a planilha de produtos da Olist para começar.") }
-    var showCountingScreen by remember { mutableStateOf(false) }
-    var barcode by remember { mutableStateOf("") }
-    var quantity by remember { mutableStateOf("0") }
-    var location by remember { mutableStateOf("") }
+    var showCountingScreen by rememberSaveable { mutableStateOf(false) }
+    var barcode by rememberSaveable { mutableStateOf("") }
+    var quantity by rememberSaveable { mutableStateOf("0") }
+    var location by rememberSaveable { mutableStateOf("") }
     var candidate by remember { mutableStateOf<Product?>(null) }
     var choices by remember { mutableStateOf<List<Product>>(emptyList()) }
     var showDuplicateDialog by remember { mutableStateOf(false) }
@@ -121,7 +228,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         val summary = database.mergeCatalog(catalog)
         candidate = null
         choices = emptyList()
-        status = "Importação concluída: ${summary.added} novos e ${summary.updated} atualizados. Contagens anteriores preservadas."
+        status = "Importação concluída: ${summary.added} novos, ${summary.updated} atualizados e ${summary.removed} de outros tipos removidos. Contagens anteriores preservadas."
         revision++
     }
 
@@ -144,6 +251,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
 
     val barcodeScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
         result.contents?.let { scanned ->
+            showCountingScreen = true
             barcode = scanned
             val matches = database.findByBarcode(scanned)
             choices = matches
@@ -167,16 +275,16 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/vnd.ms-excel"),
+        ActivityResultContracts.CreateDocument("text/plain"),
     ) { uri ->
         if (uri != null) {
             runCatching {
-                contentResolver.openOutputStream(uri)?.use { output ->
-                    OlistWorkbook.export(database.headers(), database.sheetName(), database.countedProducts(), output)
-                } ?: error("Não foi possível salvar a planilha.")
-                status = "Planilha exportada com ${database.countedCount()} produtos contados."
+                val summary = contentResolver.openOutputStream(uri)?.use { output ->
+                    OlistInventoryTxt.export(database.countedProducts(), output)
+                } ?: error("Não foi possível salvar o arquivo.")
+                status = "TXT exportado: ${summary.unitCount} unidades de ${summary.productCount} produtos."
                 revision++
-            }.onFailure { error -> status = error.message ?: "Não foi possível exportar a planilha." }
+            }.onFailure { error -> status = error.message ?: "Não foi possível exportar o arquivo." }
         }
     }
 
@@ -214,12 +322,12 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         Text("  Importar XLS")
                     }
                     OutlinedButton(
-                        onClick = { exportLauncher.launch("inventario_olist.xls") },
+                        onClick = { exportLauncher.launch("estoque_coletor.txt") },
                         enabled = countedCount > 0,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Exportar")
+                        Text("  Exportar TXT")
                     }
                 }
 
