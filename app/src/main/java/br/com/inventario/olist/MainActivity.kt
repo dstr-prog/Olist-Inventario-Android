@@ -220,6 +220,9 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     var showZeroQuantityDialog by remember { mutableStateOf(false) }
     var showAdjustDialog by remember { mutableStateOf(false) }
     var showImportRequiredDialog by remember { mutableStateOf(false) }
+    var showImportCountsDialog by remember { mutableStateOf(false) }
+    var showClearCountsDialog by remember { mutableStateOf(false) }
+    var pendingCatalog by remember { mutableStateOf<Catalog?>(null) }
     var adjustedQuantity by remember { mutableStateOf("") }
     var notFoundBarcode by remember { mutableStateOf<String?>(null) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
@@ -269,12 +272,16 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         notFoundBarcode = code
     }
 
-    fun importCatalog(catalog: Catalog) {
-        val summary = database.mergeCatalog(catalog)
-        candidate = null
-        choices = emptyList()
-        status = "Importação concluída: ${summary.added} novos, ${summary.updated} atualizados e ${summary.removed} de outros tipos removidos. Contagens anteriores preservadas."
-        revision++
+    fun importCatalog(catalog: Catalog, clearPreviousCounts: Boolean = false) {
+        runCatching { database.mergeCatalog(catalog, clearPreviousCounts) }
+            .onSuccess { summary ->
+                candidate = null
+                choices = emptyList()
+                val countsMessage = if (clearPreviousCounts) "Contagens anteriores limpas." else "Contagens anteriores preservadas."
+                status = "Importação concluída: ${summary.added} novos, ${summary.updated} atualizados e ${summary.removed} de outros tipos removidos. $countsMessage"
+                revision++
+            }
+            .onFailure { error -> status = error.message ?: "Não foi possível importar a planilha." }
     }
 
     fun selectProduct(product: Product) {
@@ -322,7 +329,8 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         if (uri != null) {
             runCatching {
                 val catalog = OlistWorkbook.import(contentResolver, uri)
-                importCatalog(catalog)
+                pendingCatalog = catalog
+                showImportCountsDialog = true
             }.onFailure { error -> status = error.message ?: "Não foi possível importar a planilha." }
         }
     }
@@ -397,6 +405,14 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
 
                 Button(onClick = ::enterCounting, modifier = Modifier.fillMaxWidth()) {
                     Text("Contagem")
+                }
+
+                OutlinedButton(
+                    onClick = { showClearCountsDialog = true },
+                    enabled = countedCount > 0,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Limpar contagens anteriores")
                 }
 
                 if (status.isNotBlank()) {
@@ -607,6 +623,63 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             text = { Text("Importe a planilha de produtos da Olist para começar a contagem.") },
             confirmButton = {
                 Button(onClick = { showImportRequiredDialog = false }) { Text("OK") }
+            },
+        )
+    }
+
+    if (showImportCountsDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showImportCountsDialog = false
+                pendingCatalog = null
+            },
+            title = { Text("Contagens anteriores") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Deseja manter as contagens existentes ou limpar antes de importar esta planilha?")
+                    Button(
+                        onClick = {
+                            pendingCatalog?.let { catalog -> importCatalog(catalog) }
+                            pendingCatalog = null
+                            showImportCountsDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Manter contagens") }
+                    OutlinedButton(
+                        onClick = {
+                            pendingCatalog?.let { catalog -> importCatalog(catalog, clearPreviousCounts = true) }
+                            pendingCatalog = null
+                            showImportCountsDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Limpar e importar") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    pendingCatalog = null
+                    showImportCountsDialog = false
+                }) { Text("Cancelar") }
+            },
+        )
+    }
+
+    if (showClearCountsDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCountsDialog = false },
+            title = { Text("Limpar contagens anteriores?") },
+            text = { Text("Todas as quantidades e localizações contadas serão apagadas. O catálogo de produtos será mantido.") },
+            confirmButton = {
+                Button(onClick = {
+                    val cleared = database.clearCounts()
+                    showClearCountsDialog = false
+                    status = "Contagens removidas de $cleared produtos."
+                    revision++
+                }) { Text("Limpar contagens") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCountsDialog = false }) { Text("Cancelar") }
             },
         )
     }

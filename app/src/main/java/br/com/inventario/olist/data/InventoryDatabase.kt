@@ -40,7 +40,7 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-    fun mergeCatalog(catalog: Catalog): CatalogImportSummary {
+    fun mergeCatalog(catalog: Catalog, clearPreviousCounts: Boolean = false): CatalogImportSummary {
         val currentHeaders = headers()
         require(currentHeaders.isEmpty() || currentHeaders == catalog.headers) {
             "A planilha tem colunas diferentes da primeira importada. Use arquivos exportados no mesmo formato."
@@ -50,6 +50,9 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
         var removed = 0
         writableDatabase.beginTransaction()
         try {
+            if (clearPreviousCounts) {
+                writableDatabase.execSQL("UPDATE products SET counted_quantity = NULL, counted_location = ''")
+            }
             val includedIds = catalog.products.mapTo(mutableSetOf()) { it.id }
             catalog.excludedProductIds.filterNot { it in includedIds }.distinct().forEach { productId ->
                 removed += writableDatabase.delete("products", "id = ?", arrayOf(productId))
@@ -118,6 +121,11 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
             put("counted_location", "")
         }, "id = ?", arrayOf(productId))
     }
+
+    fun clearCounts(): Int = writableDatabase.update("products", ContentValues().apply {
+        putNull("counted_quantity")
+        put("counted_location", "")
+    }, "counted_quantity IS NOT NULL OR counted_location <> ''", null)
 
     private fun queryProducts(sql: String, args: Array<String>): List<Product> {
         val products = mutableListOf<Product>()
