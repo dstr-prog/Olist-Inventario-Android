@@ -6,6 +6,7 @@ import org.apache.poi.hssf.usermodel.HSSFWorkbook
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.DataFormatter
 import org.apache.poi.ss.usermodel.Row
+import java.io.OutputStream
 import java.text.Normalizer
 
 object OlistWorkbook {
@@ -42,6 +43,33 @@ object OlistWorkbook {
                 }
                 return Catalog(headers, sheet.sheetName, products, excludedProductIds.toList())
             }
+        }
+    }
+
+    fun exportInventory(products: List<Product>, output: OutputStream) {
+        require(products.isNotEmpty()) { "Ainda não há produtos contados para exportar." }
+        val headers = listOf("ID*", "Produto", "Código (SKU)*", "GTIN/EAN", "Localização", "Saldo em estoque")
+        HSSFWorkbook().use { workbook ->
+            val sheet = workbook.createSheet("Inventário de Estoque")
+            val headerRow = sheet.createRow(0)
+            headers.forEachIndexed { index, header -> headerRow.createCell(index).setCellValue(header) }
+
+            products.forEachIndexed { index, product ->
+                require(product.id.isNotBlank()) {
+                    "O produto '${product.description}' está sem ID e não pode ser exportado."
+                }
+                require(product.sku.isNotBlank()) {
+                    "O produto '${product.description}' está sem SKU, que é obrigatório na planilha de inventário."
+                }
+                val row = sheet.createRow(index + 1)
+                row.createCell(0).setCellValue(product.id)
+                row.createCell(1).setCellValue(product.description)
+                row.createCell(2).setCellValue(product.sku)
+                row.createCell(3).setCellValue(product.gtin)
+                row.createCell(4).setCellValue(product.countedLocation.ifBlank { product.location })
+                row.createCell(5).setCellValue(product.countedQuantity ?: 0.0)
+            }
+            workbook.write(output)
         }
     }
 

@@ -112,6 +112,13 @@ class InventoryDatabase(context: Context) : SQLiteOpenHelper(context, "inventory
         }, "id = ?", arrayOf(productId))
     }
 
+    fun clearCount(productId: String) {
+        writableDatabase.update("products", ContentValues().apply {
+            putNull("counted_quantity")
+            put("counted_location", "")
+        }, "id = ?", arrayOf(productId))
+    }
+
     private fun queryProducts(sql: String, args: Array<String>): List<Product> {
         val products = mutableListOf<Product>()
         readableDatabase.rawQuery(sql, args).use { cursor ->

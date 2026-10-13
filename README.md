@@ -1,6 +1,6 @@
 # Inventário Olist para Android
 
-Aplicativo Android nativo em Kotlin para contar produtos do catálogo exportado pela Olist e preparar o arquivo TXT de balanço de estoque exigido pelo sistema.
+Aplicativo Android nativo em Kotlin para contar produtos do catálogo exportado pela Olist e gerar a planilha de inventário exigida pelo sistema.
 
 ## Como funciona
 
@@ -9,7 +9,7 @@ Aplicativo Android nativo em Kotlin para contar produtos do catálogo exportado 
 3. Confira ID, SKU, descrição e GTIN/EAN do produto.
 4. Informe a localização (até 10 caracteres) e a quantidade contada.
 5. Se já houver uma contagem, escolha somar, substituir ou usar **Ajustar quantidade** para corrigir o total salvo. Ao registrar, o app limpa e devolve o foco ao código de barras/SKU. Quantidade zero exige confirmação e é aceita.
-6. Volte à tela inicial e exporte o TXT de balanço para importá-lo na Olist.
+6. Volte à tela inicial e exporte a planilha de inventário da Olist com localização e saldo contado.
 
 O catálogo e as contagens ficam armazenados localmente no aparelho, permitindo inventariar sem conexão com a internet. A localização permanece preenchida ao trocar de produto e pode ser alterada quando mudar de corredor; ela é opcional.
 
@@ -17,7 +17,9 @@ O catálogo e as contagens ficam armazenados localmente no aparelho, permitindo 
 
 Para importar o catálogo, o app usa a primeira aba da planilha `.xls` exportada pela Olist e reconhece os cabeçalhos de ID, SKU, descrição, GTIN/EAN, Localização e Tipo do produto. Somente linhas com Tipo do produto igual a `S` são adicionadas ao catálogo; outros tipos, como `V` e `K`, são ignorados e removidos do catálogo local quando encontrados em uma planilha importada. Cada importação acrescenta produtos novos e atualiza os dados dos que já existem, identificados pelo ID. Contagens e localizações contadas são preservadas quando um produto é importado novamente. As planilhas precisam manter os mesmos cabeçalhos e a mesma ordem de colunas da primeira importação.
 
-Para registrar o balanço, o app gera um `.txt` sem cabeçalho, com um código por linha. A quantidade contada determina o número de linhas repetidas: por exemplo, quantidade 3 gera três linhas com o EAN do produto. Quando o EAN não está disponível, é usado o SKU, que também é aceito pela Olist. Quantidade zero gera zero linhas; quantidades fracionadas não podem ser exportadas. O arquivo usa UTF-8 com quebras de linha CRLF e respeita o limite de 2.000.000 bytes (2 MB) informado pela Olist.
+O app gera uma planilha `.xls` em uma aba `Inventário de Estoque`, com as colunas `ID*`, `Produto`, `Código (SKU)*`, `GTIN/EAN`, `Localização` e `Saldo em estoque`. A planilha contém uma linha por produto contado. Se a localização não foi informada durante a contagem, mantém a localização importada.
+
+A localização é opcional e deve seguir o formato `D.RR.PP.N`: depósito em letras, rua e prédio com dois dígitos cada, e nível com um dígito. Segure uma linha da lista de contagens para editar quantidade e localização; deslize a linha para a direita para solicitar a exclusão da contagem.
 
 ## Desenvolvimento
 
@@ -40,7 +42,7 @@ O APK padrão será gerado em `app\build\outputs\apk\debug\app-debug.apk`. O arq
 
 Na abertura, o app exibe uma tela da Dstr Tech com o número da versão por pelo menos dois segundos.
 
-Para instalar no celular, basta transferir o arquivo `app-debug.apk` e abri-lo no Android. Para usar o inventário, transfira também a planilha de produtos `.xls` e importe-a pelo app; ela é um arquivo de dados separado do aplicativo. Depois da contagem, importe na Olist o TXT gerado pelo app.
+Para instalar no celular, basta transferir o arquivo `app-debug.apk` e abri-lo no Android. Para usar o inventário, transfira também a planilha de produtos `.xls` e importe-a pelo app; ela é um arquivo de dados separado do aplicativo. Depois da contagem, importe na Olist a planilha de inventário gerada pelo app.
 
 ## Estado e validação
 
