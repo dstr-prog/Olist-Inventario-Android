@@ -3,6 +3,7 @@ package br.com.inventario.olist
 import android.os.Bundle
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.content.Context
 import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -72,6 +73,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
@@ -84,6 +86,9 @@ import br.com.inventario.olist.data.Product
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import java.text.NumberFormat
+import java.text.Normalizer
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.delay
 
@@ -207,6 +212,15 @@ class SplashActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun InventoryScreen(database: InventoryDatabase, contentResolver: android.content.ContentResolver) {
+    val context = LocalContext.current
+    val exportPreferences = remember(context) {
+        context.getSharedPreferences("inventory_export_settings", Context.MODE_PRIVATE)
+    }
+    var deviceDescription by remember {
+        mutableStateOf(exportPreferences.getString("device_description", "").orEmpty())
+    }
+    var deviceDescriptionInput by remember { mutableStateOf(deviceDescription) }
+    var showDeviceDescriptionDialog by remember { mutableStateOf(deviceDescription.isBlank()) }
     var revision by remember { mutableStateOf(0) }
     var status by remember { mutableStateOf("") }
     var countingError by remember { mutableStateOf("") }
@@ -336,17 +350,24 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     }
 
     val spreadsheetExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/vnd.ms-excel"),
+        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     ) { uri ->
         if (uri != null) {
             runCatching {
                 contentResolver.openOutputStream(uri)?.use { output ->
                     OlistWorkbook.exportInventory(database.countedProducts(), output)
                 } ?: error("Não foi possível salvar a planilha.")
-                status = "Planilha de inventário exportada com ${database.countedCount()} produtos."
+                status = "Planilha XLSX de inventário exportada com ${database.countedCount()} produtos."
                 revision++
             }.onFailure { error -> status = error.message ?: "Não foi possível exportar a planilha." }
         }
+    }
+
+    fun startInventoryExport() {
+        runCatching {
+            require(deviceDescription.isNotBlank()) { "Informe a descrição deste celular antes de exportar." }
+            spreadsheetExportLauncher.launch(nextInventoryFileName(exportPreferences, deviceDescription))
+        }.onFailure { error -> status = error.message ?: "Não foi possível iniciar a exportação." }
     }
 
     val productCount = remember(revision) { database.productCount() }
@@ -376,6 +397,17 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             if (!showCountingScreen) {
                 Text("Contagem de estoque", fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text("Carregue os produtos, conte pelo código de barras e exporte para atualizar a Olist.", color = Color(0xFF56615E))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Celular: $deviceDescription", color = Color(0xFF56615E))
+                    TextButton(onClick = {
+                        deviceDescriptionInput = deviceDescription
+                        showDeviceDescriptionDialog = true
+                    }) { Text("Alterar") }
+                }
 
                 ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = PaleGreen)) {
                     Row(Modifier.fillMaxWidth().padding(18.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -394,12 +426,12 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         Text("  Importar XLS")
                     }
                     OutlinedButton(
-                        onClick = { spreadsheetExportLauncher.launch("estoque_inventario.xls") },
+                        onClick = ::startInventoryExport,
                         enabled = countedCount > 0,
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Exportar XLS")
+                        Text("  Exportar XLSX")
                     }
                 }
 
@@ -623,6 +655,48 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             text = { Text("Importe a planilha de produtos da Olist para começar a contagem.") },
             confirmButton = {
                 Button(onClick = { showImportRequiredDialog = false }) { Text("OK") }
+            },
+        )
+    }
+
+    if (showDeviceDescriptionDialog) {
+        val safeDescription = sanitizeFilePart(deviceDescriptionInput)
+        AlertDialog(
+            onDismissRequest = { if (deviceDescription.isNotBlank()) showDeviceDescriptionDialog = false },
+            title = { Text("Identificação deste celular") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Informe uma descrição única para este aparelho. Ela será salva e usada nos nomes dos arquivos exportados.")
+                    OutlinedTextField(
+                        value = deviceDescriptionInput,
+                        onValueChange = { deviceDescriptionInput = it.take(40) },
+                        label = { Text("Descrição do celular") },
+                        supportingText = { Text("Ex.: COLETOR-01. No arquivo: ${safeDescription.ifBlank { "descricao" }}") },
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = safeDescription.isNotBlank(),
+                    onClick = {
+                        val saved = exportPreferences.edit()
+                            .putString("device_description", deviceDescriptionInput.trim())
+                            .commit()
+                        if (saved) {
+                            deviceDescription = deviceDescriptionInput.trim()
+                            showDeviceDescriptionDialog = false
+                            status = "Descrição do celular salva."
+                        } else {
+                            status = "Não foi possível salvar a descrição do celular."
+                        }
+                    },
+                ) { Text("Salvar") }
+            },
+            dismissButton = {
+                if (deviceDescription.isNotBlank()) {
+                    TextButton(onClick = { showDeviceDescriptionDialog = false }) { Text("Cancelar") }
+                }
             },
         )
     }
@@ -878,6 +952,27 @@ private fun ProductCard(product: Product) {
 }
 
 private fun formatQuantity(value: Double): String = NumberFormat.getNumberInstance(Locale.forLanguageTag("pt-BR")).format(value)
+
+private fun nextInventoryFileName(
+    preferences: android.content.SharedPreferences,
+    description: String,
+): String {
+    val safeDescription = sanitizeFilePart(description)
+    require(safeDescription.isNotBlank()) { "A descrição do celular precisa ter letras ou números." }
+    val date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyMMdd", Locale.ROOT))
+    val sequenceKey = "export_sequence_$date"
+    val sequence = preferences.getInt(sequenceKey, 0) + 1
+    check(preferences.edit().putInt(sequenceKey, sequence).commit()) {
+        "Não foi possível salvar a sequência diária de exportação."
+    }
+    return "INV-OLIST-$safeDescription-$date-${sequence.toString().padStart(2, '0')}.xlsx"
+}
+
+private fun sanitizeFilePart(value: String): String = Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
+    .replace(Regex("\\p{Mn}+"), "")
+    .replace(Regex("[^A-Za-z0-9]+"), "-")
+    .trim('-')
+    .uppercase(Locale.ROOT)
 
 private fun formatLocationInput(value: String): String {
     val normalized = value.uppercase(Locale.ROOT).filter { it.isLetterOrDigit() || it == '.' }

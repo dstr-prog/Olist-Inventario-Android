@@ -98,6 +98,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
-    // Supports the legacy .xls format exported by the user's Olist account.
+    // Supports legacy .xls imports and .xlsx inventory exports on Android.
     implementation("com.github.SUPERCILEX.poi-android:poi:3.17")
 }

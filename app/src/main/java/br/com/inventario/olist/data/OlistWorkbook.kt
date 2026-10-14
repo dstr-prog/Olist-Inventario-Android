@@ -5,7 +5,7 @@ import android.net.Uri
 import org.apache.poi.hssf.usermodel.HSSFWorkbook
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.DataFormatter
-import org.apache.poi.ss.usermodel.Row
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import java.io.OutputStream
 import java.text.Normalizer
 
@@ -49,7 +49,7 @@ object OlistWorkbook {
     fun exportInventory(products: List<Product>, output: OutputStream) {
         require(products.isNotEmpty()) { "Ainda não há produtos contados para exportar." }
         val headers = listOf("ID*", "Produto", "Código (SKU)*", "GTIN/EAN", "Localização", "Saldo em estoque")
-        HSSFWorkbook().use { workbook ->
+        XSSFWorkbook().use { workbook ->
             val sheet = workbook.createSheet("Inventário de Estoque")
             val headerRow = sheet.createRow(0)
             headers.forEachIndexed { index, header -> headerRow.createCell(index).setCellValue(header) }
