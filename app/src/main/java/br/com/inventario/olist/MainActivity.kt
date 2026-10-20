@@ -350,14 +350,14 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     }
 
     val spreadsheetExportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ActivityResultContracts.CreateDocument("application/vnd.ms-excel"),
     ) { uri ->
         if (uri != null) {
             runCatching {
                 contentResolver.openOutputStream(uri)?.use { output ->
                     OlistWorkbook.exportInventory(database.countedProducts(), output)
                 } ?: error("Não foi possível salvar a planilha.")
-                status = "Planilha XLSX de inventário exportada com ${database.countedCount()} produtos."
+                status = "Planilha XLS de inventário exportada com ${database.countedCount()} produtos."
                 revision++
             }.onFailure { error -> status = error.message ?: "Não foi possível exportar a planilha." }
         }
@@ -431,7 +431,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         modifier = Modifier.weight(1f),
                     ) {
                         Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Exportar XLSX")
+                        Text("  Exportar XLS")
                     }
                 }
 
@@ -965,7 +965,7 @@ private fun nextInventoryFileName(
     check(preferences.edit().putInt(sequenceKey, sequence).commit()) {
         "Não foi possível salvar a sequência diária de exportação."
     }
-    return "INV-OLIST-$safeDescription-$date-${sequence.toString().padStart(2, '0')}.xlsx"
+    return "INV-OLIST-$safeDescription-$date-${sequence.toString().padStart(2, '0')}.xls"
 }
 
 private fun sanitizeFilePart(value: String): String = Normalizer.normalize(value.trim(), Normalizer.Form.NFD)
