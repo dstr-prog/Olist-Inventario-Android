@@ -228,6 +228,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     var barcode by rememberSaveable { mutableStateOf("") }
     var quantity by rememberSaveable { mutableStateOf("0") }
     var location by rememberSaveable { mutableStateOf("") }
+    var scanningLocation by rememberSaveable { mutableStateOf(false) }
     var candidate by remember { mutableStateOf<Product?>(null) }
     var choices by remember { mutableStateOf<List<Product>>(emptyList()) }
     var showDuplicateDialog by remember { mutableStateOf(false) }
@@ -237,6 +238,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     var showImportCountsDialog by remember { mutableStateOf(false) }
     var showClearCountsDialog by remember { mutableStateOf(false) }
     var pendingCatalog by remember { mutableStateOf<Catalog?>(null) }
+    var pendingImportCount by remember { mutableStateOf(0) }
     var adjustedQuantity by remember { mutableStateOf("") }
     var notFoundBarcode by remember { mutableStateOf<String?>(null) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
@@ -286,13 +288,14 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
         notFoundBarcode = code
     }
 
-    fun importCatalog(catalog: Catalog, clearPreviousCounts: Boolean = false) {
+    fun importCatalog(catalog: Catalog, clearPreviousCounts: Boolean = false, sourceCount: Int = 1) {
         runCatching { database.mergeCatalog(catalog, clearPreviousCounts) }
             .onSuccess { summary ->
                 candidate = null
                 choices = emptyList()
                 val countsMessage = if (clearPreviousCounts) "Contagens anteriores limpas." else "Contagens anteriores preservadas."
-                status = "Importação concluída: ${summary.added} novos, ${summary.updated} atualizados e ${summary.removed} de outros tipos removidos. $countsMessage"
+                val filesMessage = if (sourceCount == 1) "1 planilha" else "$sourceCount planilhas"
+                status = "Importação de $filesMessage concluída: ${summary.added} novos, ${summary.updated} atualizados e ${summary.removed} de outros tipos removidos. $countsMessage"
                 revision++
             }
             .onFailure { error -> status = error.message ?: "Não foi possível importar a planilha." }
@@ -317,33 +320,57 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
     }
 
     val barcodeScanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { scanned ->
-            if (database.productCount() == 0) {
-                showImportRequiredDialog = true
-                return@let
-            }
-            showCountingScreen = true
-            barcode = scanned
-            val matches = database.findByBarcode(scanned)
-            choices = matches
-            candidate = matches.singleOrNull()
-            candidate?.let(::selectProduct)
-            status = when {
-                matches.isEmpty() -> {
-                    reportProductNotFound(scanned)
-                    ""
+        if (scanningLocation) {
+            scanningLocation = false
+            result.contents?.let { scanned ->
+                val scannedLocation = formatLocationInput(scanned)
+                if (isValidLocation(scannedLocation)) {
+                    location = scannedLocation
+                    countingError = ""
+                } else {
+                    countingError = "Localização inválida. Use o formato: D.RR.PP.N"
                 }
-                matches.size == 1 -> "Produto localizado."
-                else -> "Há mais de um produto com esse código. Escolha o correto."
+            }
+        } else {
+            result.contents?.let { scanned ->
+                if (database.productCount() == 0) {
+                    showImportRequiredDialog = true
+                    return@let
+                }
+                showCountingScreen = true
+                barcode = scanned
+                val matches = database.findByBarcode(scanned)
+                choices = matches
+                candidate = matches.singleOrNull()
+                candidate?.let(::selectProduct)
+                status = when {
+                    matches.isEmpty() -> {
+                        reportProductNotFound(scanned)
+                        ""
+                    }
+                    matches.size == 1 -> "Produto localizado."
+                    else -> "Há mais de um produto com esse código. Escolha o correto."
+                }
             }
         }
     }
 
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
             runCatching {
-                val catalog = OlistWorkbook.import(contentResolver, uri)
+                val catalogs = uris.map { uri -> OlistWorkbook.import(contentResolver, uri) }
+                val headers = catalogs.first().headers
+                require(catalogs.all { it.headers == headers }) {
+                    "As planilhas selecionadas têm cabeçalhos diferentes. Selecione arquivos exportados no mesmo formato."
+                }
+                val catalog = Catalog(
+                    headers = headers,
+                    sheetName = catalogs.first().sheetName,
+                    products = catalogs.flatMap { it.products },
+                    excludedProductIds = catalogs.flatMap { it.excludedProductIds }.distinct(),
+                )
                 pendingCatalog = catalog
+                pendingImportCount = catalogs.size
                 showImportCountsDialog = true
             }.onFailure { error -> status = error.message ?: "Não foi possível importar a planilha." }
         }
@@ -434,6 +461,11 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         Text("  Exportar XLS")
                     }
                 }
+                Text(
+                    "No seletor do Android, abra Recentes ou uma pasta e selecione várias planilhas antes de confirmar.",
+                    color = Color(0xFF56615E),
+                    fontSize = 13.sp,
+                )
 
                 Button(onClick = ::enterCounting, modifier = Modifier.fillMaxWidth()) {
                     Text("Contagem")
@@ -467,6 +499,19 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
                         isError = location.isNotBlank() && !isValidLocation(location),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                val options = ScanOptions()
+                                    .setDesiredBarcodeFormats(ScanOptions.ONE_D_CODE_TYPES)
+                                    .setPrompt("Aponte a câmera para o código da localização")
+                                    .setBeepEnabled(true)
+                                    .setOrientationLocked(false)
+                                scanningLocation = true
+                                barcodeScanner.launch(options)
+                            }) {
+                                Icon(Icons.Default.PhotoCamera, contentDescription = "Ler localização com a câmera")
+                            }
+                        },
                     )
                     OutlinedTextField(
                         value = barcode,
@@ -706,23 +751,32 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             onDismissRequest = {
                 showImportCountsDialog = false
                 pendingCatalog = null
+                pendingImportCount = 0
             },
             title = { Text("Contagens anteriores") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Deseja manter as contagens existentes ou limpar antes de importar esta planilha?")
+                    Text(
+                        if (pendingImportCount == 1) "1 planilha selecionada será importada."
+                        else "$pendingImportCount planilhas selecionadas serão combinadas na importação."
+                    )
+                    Text("Deseja manter as contagens existentes ou limpar antes de importar estas planilhas?")
                     Button(
                         onClick = {
-                            pendingCatalog?.let { catalog -> importCatalog(catalog) }
+                            pendingCatalog?.let { catalog -> importCatalog(catalog, sourceCount = pendingImportCount) }
                             pendingCatalog = null
+                            pendingImportCount = 0
                             showImportCountsDialog = false
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Manter contagens") }
                     OutlinedButton(
                         onClick = {
-                            pendingCatalog?.let { catalog -> importCatalog(catalog, clearPreviousCounts = true) }
+                            pendingCatalog?.let { catalog ->
+                                importCatalog(catalog, clearPreviousCounts = true, sourceCount = pendingImportCount)
+                            }
                             pendingCatalog = null
+                            pendingImportCount = 0
                             showImportCountsDialog = false
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -733,6 +787,7 @@ private fun InventoryScreen(database: InventoryDatabase, contentResolver: androi
             dismissButton = {
                 TextButton(onClick = {
                     pendingCatalog = null
+                    pendingImportCount = 0
                     showImportCountsDialog = false
                 }) { Text("Cancelar") }
             },

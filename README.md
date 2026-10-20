@@ -5,10 +5,10 @@ Aplicativo Android nativo em Kotlin para contar produtos do catálogo exportado 
 ## Como funciona
 
 1. Na primeira abertura, informe uma descrição única para o celular, por exemplo `COLETOR-01`. O app salva a descrição e permite alterá-la na tela inicial.
-2. Importe uma ou mais partes da planilha de produtos `.xls` exportada pela Olist.
+2. Importe uma ou mais partes da planilha de produtos `.xls` exportada pela Olist. No seletor do Android, é possível marcar vários arquivos de uma vez, inclusive pela lista **Recentes**.
 3. Abra **Contagem** e localize o produto pelo GTIN/EAN com a câmera, digitando o código ou usando um leitor Bluetooth que funcione como teclado.
 4. Confira ID, SKU, descrição e GTIN/EAN do produto.
-5. Informe a localização (até 10 caracteres) e a quantidade contada.
+5. Informe ou leia com a câmera o código da localização no formato `D.RR.PP.N` e informe a quantidade contada.
 6. Se já houver uma contagem, escolha somar, substituir ou usar **Ajustar quantidade** para corrigir o total salvo. Ao registrar, o app limpa e devolve o foco ao código de barras/SKU. Quantidade zero exige confirmação e é aceita.
 7. Volte à tela inicial e exporte a planilha de inventário da Olist com localização e saldo contado.
 
